@@ -1,0 +1,107 @@
+from flask import Flask, abort
+from flask_restful import Resource, Api, reqparse, inputs
+import sys
+from flask_sqlalchemy import SQLAlchemy
+import datetime
+
+app = Flask(__name__)
+db = SQLAlchemy(app)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///greens.db'
+# write your code here
+api = Api(app)
+parser = reqparse.RequestParser()
+parser_event = reqparse.RequestParser()
+
+
+class Task(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    event = db.Column(db.String, nullable=False)
+    date = db.Column(db.Date, nullable=False)
+
+    def __str__(self):
+        return f'event:{self.event}, date:{self.date}'
+
+
+db.create_all()
+
+parser.add_argument("event", type=str, help="The event name is required!", required=True)
+parser.add_argument("date", type=inputs.date,
+                    help="The event date with the correct format is required! The correct format is YYYY-MM-DD!",
+                    required=True)
+parser_event.add_argument('start_time', type=inputs.date)
+parser_event.add_argument('end_time', type=inputs.date)
+
+tasks = Task.query.all()
+
+
+class Event(Resource):
+    def get(self, event_id):
+        event = Task.query.filter(Task.id == event_id).first()
+        if event:
+            return {'id': event.id, 'event': event.event, 'date': str(event.date)}
+        return abort(404, "The event doesn't exist!")
+    def delete(self, event_id):
+        event = Task.query.filter(Task.id == event_id).first()
+        if event:
+            db.session.delete(event)
+            db.session.commit()
+            return { "message": "The event has been deleted!"}
+        return abort(404, "The event doesn't exist!")
+
+
+
+
+
+class WebCalender(Resource):
+    def get(self):
+        events = list()
+        if Task.query.all():
+            tasks = Task.query.filter(Task.date == datetime.date.today()).all()
+            for i in tasks:
+                events.append({"id": i.id, "event": i.event, "date": str(i.date)})
+            return events
+
+        return {"data": "There are no events for today!"}
+
+
+class PostWebCalender(Resource):
+
+    def post(self):
+        data = parser.parse_args()
+        new_task = Task(event=data['event'], date=data['date'])
+        db.session.add(new_task)
+        db.session.commit()
+        return {
+            "message": "The event has been added!",
+            "event": f"{data['event']}",
+            "date": f"{data['date'].date()}"
+        }
+
+    def get(self):
+        events = list()
+        data = parser_event.parse_args()
+        if data['start_time'] and data['end_time']:
+            tasks = Task.query.filter(Task.date.between(data['start_time'], data['end_time']))
+            if tasks:
+                for i in tasks:
+                    events.append({"id": i.id, "event": i.event, "date": str(i.date)})
+                return events
+
+        if Task.query.all():
+            tasks = Task.query.all()
+            for i in tasks:
+                events.append({"id": i.id, "event": i.event, "date": str(i.date)})
+            return events
+
+
+api.add_resource(WebCalender, '/event/today')
+api.add_resource(PostWebCalender, '/event/')
+api.add_resource(Event, '/event/<int:event_id>')
+
+# do not change the way you run the program
+if __name__ == '__main__':
+    if len(sys.argv) > 1:
+        arg_host, arg_port = sys.argv[1].split(':')
+        app.run(host=arg_host, port=arg_port)
+    else:
+        app.run()
